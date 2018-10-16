@@ -2,6 +2,8 @@ package schedops
 
 import (
 	"fmt"
+	"html/template"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -9,11 +11,13 @@ import (
 	"github.com/libopenstorage/openstorage/api"
 	"github.com/portworx/sched-ops/k8s"
 	"github.com/portworx/sched-ops/task"
+	"github.com/portworx/spawn/log"
 	"github.com/portworx/torpedo/drivers/node"
 	k8s_driver "github.com/portworx/torpedo/drivers/scheduler/k8s"
 	"github.com/portworx/torpedo/drivers/volume"
 	"github.com/portworx/torpedo/pkg/errors"
 	"github.com/sirupsen/logrus"
+	yaml "gopkg.in/yaml.v2"
 	batch_v1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -44,6 +48,14 @@ const (
 	dcosNodeType           = "kubernetes.dcos.io/node-type"
 	talismanServiceAccount = "talisman-account"
 	talismanImage          = "portworx/talisman:latest"
+	// pxPath is path to pxctl executable binary
+	pxPath = "/opt/pwx/bin/pxctl"
+	// tokenCmd is command to get storage token for cluster pair
+	tokenCmd = "cluster token show"
+	// remoteConfig is configMap kye of remote kubeconfig file
+	remoteConfig = "remoteConfig"
+	// pariFileName is cluster pair yaml spec file name
+	pairFileName = "/clusterPair.yaml"
 )
 
 const (
@@ -61,6 +73,16 @@ type errLabelPresent struct {
 
 func (e *errLabelPresent) Error() string {
 	return fmt.Sprintf("label %s is present on node %s", e.label, e.node)
+}
+
+// ClusterPairRequest to create new clusterpair spec file
+type ClusterPairRequest struct {
+	PairName       string
+	ConfigMapName  string
+	SpecDirPath    string
+	PxIP           string
+	PxClusterToken string
+	PxPort         string
 }
 
 // errLabelAbsent error type for a label absent on a node
@@ -483,6 +505,84 @@ func (k *k8sSchedOps) IsPXReadyOnNode(n node.Node) bool {
 	return true
 }
 
+// CreateCRDObject create custom objects using config map
+func (k *k8sSchedOps) CreateClusterPairSpec(req ClusterPairRequest) error {
+	// parseKubeConfig file from configMap
+	kubeSpec, err := parseKubeConfig(req.ConfigMapName)
+	if err != nil {
+		return err
+	}
+
+	// CreateClusterPair spec
+	clusterPair := &ClusterPair{
+		PairName:             req.PairName,
+		RemotePxIP:           req.PxIP,
+		RemotePxPort:         req.PxPort,
+		RemotePxToken:        req.PxClusterToken,
+		RemoteKubeServer:     kubeSpec.ClusterInfo[0].Cluster["server"],
+		RemoteConfigAuthData: kubeSpec.ClusterInfo[0].Cluster["certificate-authority-data"],
+		RemoteConfigKeyData:  kubeSpec.UserInfo[0].User["client-certificate-data"],
+		RemoteConfigCertData: kubeSpec.UserInfo[0].User["client-key-data"],
+	}
+
+	// Create pair file
+	t := template.New("clusterPair")
+	t.Parse(clusterPairSpec)
+
+	//This should be path of clusterpair yaml
+	f, err := os.Create(req.SpecDirPath + pairFileName)
+	if err != nil {
+		log.Error("Unable to create clusterPair.yaml")
+		return err
+	}
+
+	if err := t.Execute(f, clusterPair); err != nil {
+		log.Error("Couldn't write to ocp.ini")
+		return err
+	}
+
+	return nil
+}
+
+// GetStorageToken returns cluster pair token required for Cloud Migration
+func (k *k8sSchedOps) GetStorageToken(destKubeConfig string) (string, error) {
+	// get schd-ops/k8s instance of destination cluster
+	destClient := k8s.NewInstance(destKubeConfig)
+	if destClient == nil {
+		return "", fmt.Errorf("Unable to get new instance")
+	}
+
+	nodes, err := destClient.GetNodes()
+	if err != nil {
+		return "", err
+	}
+	var workerNode corev1.Node
+	// TODO(ram-infrac) :find px node, right now it's assumed that px is installed
+	// on all worker node
+	for _, node := range nodes.Items {
+		if !destClient.IsNodeMaster(node) {
+			workerNode = node
+			break
+		}
+	}
+
+	pxPods, err := k8s.Instance().GetPodsByNode(workerNode.Name, PXNamespace)
+	// using first pod to get px token
+	pod := pxPods.Items[0]
+	logrus.Info("PX Pod seletcted", pod.Name)
+
+	cmdSplit := []string{pxPath, tokenCmd}
+	logrus.Info("Executing pxctl command:", cmdSplit)
+	// Didn't understand 3rd argument ContainerName
+	out, err := destClient.RunCommandInPod(cmdSplit, pod.Name, "", PXNamespace)
+	if err != nil {
+		return out, err
+	}
+
+	logrus.Info("pxctl token received: ", out)
+	return out, nil
+}
+
 // IsPXEnabled returns true  if px is enabled on given node
 func (k *k8sSchedOps) IsPXEnabled(n node.Node) (bool, error) {
 	t := func() (interface{}, bool, error) {
@@ -510,6 +610,26 @@ func (k *k8sSchedOps) IsPXEnabled(n node.Node) (bool, error) {
 
 	logrus.Infof("PX is enabled on node %v.", n.Name)
 	return true, nil
+}
+
+func parseKubeConfig(configObject string) (*KubeConfigSpec, error) {
+	var spec *KubeConfigSpec
+	cm, err := k8s.Instance().GetConfigMap(configObject, PXNamespace)
+	if err != nil {
+		logrus.Info("Error reading config map %v", err)
+		return nil, err
+	}
+	status := cm.Data[remoteConfig]
+	if len(status) == 0 {
+		logrus.Info("found empty failure status for key:remoteConifg in config map")
+		return nil, fmt.Errorf("Empty kubeconfig for remote cluster")
+	}
+	err = yaml.Unmarshal([]byte(status), &spec)
+	if err != nil {
+		fmt.Println("Error parsing kubeconfig file", err)
+		return nil, err
+	}
+	return spec, nil
 }
 
 // getContainerPVCMountMap is a helper routine to return map of containers in the pod that

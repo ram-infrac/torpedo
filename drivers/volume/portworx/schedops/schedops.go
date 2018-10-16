@@ -33,6 +33,11 @@ type Driver interface {
 	IsPXReadyOnNode(n node.Node) bool
 	// IsPXEnabled returns true if portworx is enabled on given node
 	IsPXEnabled(n node.Node) (bool, error)
+	// GetStorageToken returns cluster pair token from destination cluster
+	// refereced by kubeconfig
+	GetStorageToken(kubeconfig string) (string, error)
+	// CreateClusterPairSpec from given cluster pair inputs
+	CreateClusterPairSpec(ClusterPairRequest) error
 }
 
 var (

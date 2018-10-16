@@ -66,6 +66,16 @@ func (d *dcosSchedOps) IsPXEnabled(n node.Node) (bool, error) {
 	// TODO: Implement this method
 	return true, nil
 }
+
+// CreateCRDObject create custom resources provided by specPath
+func (d *dcosSchedOps) CreateClusterPairSpec(req ClusterPairRequest) error {
+	return nil
+}
+
+// GetStorageToken returns cluster pair token required for Cloud Migration
+func (d *dcosSchedOps) GetStorageToken(destKubeConfig string) (string, error) {
+	return "", nil
+}
 func init() {
 	d := &dcosSchedOps{}
 	Register("dcos", d)
