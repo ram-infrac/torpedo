@@ -92,6 +92,9 @@ type Driver interface {
 
 	// Start scheduler service on the given node
 	StartSchedOnNode(n node.Node) error
+
+	// CreateCRDObjects from spec path provided
+	CreateCRDObjects(pathCRDSpec string) (*Context, error)
 }
 
 var (

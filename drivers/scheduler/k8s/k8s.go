@@ -210,6 +210,8 @@ func validateSpec(in interface{}) (interface{}, error) {
 		return specObj, nil
 	} else if specObj, ok := in.(*v1.Pod); ok {
 		return specObj, nil
+	} else if specObj, ok := in.(*stork_api.ClusterPair); ok {
+		return specObj, nil
 	}
 
 	return nil, fmt.Errorf("Unsupported object: %v", reflect.TypeOf(in))
@@ -242,6 +244,56 @@ func (k *k8s) parseK8SNode(n v1.Node) node.Node {
 
 func getAppNamespaceName(app *spec.AppSpec, instanceID string) string {
 	return fmt.Sprintf("%s-%s", app.Key, instanceID)
+}
+
+func (k *k8s) CreateCRDObjects(pathCRDSpec string) (*scheduler.Context, error) {
+	// Add Spec reading login somewhere else
+	file, err := os.Open(pathCRDSpec)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	specReader := yaml.NewYAMLReader(reader)
+
+	var specObj interface{}
+	for {
+		specContents, err := specReader.Read()
+		logrus.Info("Spec contents read", specContents)
+		if err == io.EOF {
+			break
+		}
+
+		if len(bytes.TrimSpace(specContents)) > 0 {
+			logrus.Info("Spec contents", specContents)
+			obj, err := decodeSpec(specContents)
+			if err != nil {
+				logrus.Warnf("Error decoding spec from %v: %v", pathCRDSpec, err)
+				return nil, err
+			}
+
+			specObj, err = validateSpec(obj)
+			if err != nil {
+				logrus.Warnf("Error parsing spec from %v: %v", pathCRDSpec, err)
+				return nil, err
+			}
+
+		}
+	}
+	// TODO: add timer to wait for status success/fail
+	k8sOps := k8s_ops.Instance()
+	if obj, ok := specObj.(*stork_api.ClusterPair); ok {
+		err = k8sOps.CreateClusterPair(obj)
+		if err == nil {
+			logrus.Info("Get status ", obj.Name)
+			stat, _ := k8sOps.GetClusterPair(obj.Name)
+			logrus.Info("Cluster Pauir stat", stat.Status)
+
+		}
+	}
+	logrus.Info("Cluster Pair Created Sucessuflly", err)
+	return nil, nil
 }
 
 func (k *k8s) Schedule(instanceID string, options scheduler.ScheduleOptions) ([]*scheduler.Context, error) {
@@ -910,7 +962,7 @@ func (k *k8s) GetVolumeParameters(ctx *scheduler.Context) (map[string]map[string
 				len(snapData.Spec.VolumeSnapshotDataSource.PortworxSnapshot.SnapshotID) == 0 {
 				return nil, &scheduler.ErrFailedToGetVolumeParameters{
 					App:   ctx.App,
-					Cause: fmt.Sprintf("volumesnapshotdata: %s does not have portworx volume source set", snapDataName),
+					Cause: fmt.Sprintf(" data: %s does not have portworx volume source set", snapDataName),
 				}
 			}
 
@@ -1358,7 +1410,7 @@ func (k *k8s) StopSchedOnNode(n node.Node) error {
 	}
 	err := driver.Systemctl(n, SystemdSchedServiceName, systemOpts)
 	if err != nil {
-		return &scheduler.ErrFailedToStopSchedOnNode {
+		return &scheduler.ErrFailedToStopSchedOnNode{
 			Node:          n,
 			SystemService: SystemdSchedServiceName,
 			Cause:         err.Error(),
@@ -1378,7 +1430,7 @@ func (k *k8s) StartSchedOnNode(n node.Node) error {
 	}
 	err := driver.Systemctl(n, SystemdSchedServiceName, systemOpts)
 	if err != nil {
-		return &scheduler.ErrFailedToStartSchedOnNode {
+		return &scheduler.ErrFailedToStartSchedOnNode{
 			Node:          n,
 			SystemService: SystemdSchedServiceName,
 			Cause:         err.Error(),

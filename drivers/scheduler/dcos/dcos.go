@@ -144,6 +144,10 @@ func (d *dcos) GetNodesForApp(ctx *scheduler.Context) ([]node.Node, error) {
 	return result, nil
 }
 
+func (d *dcos) CreateCRDObjects(pathCRDSpec string) (*scheduler.Context, error) {
+	return nil, nil
+}
+
 func (d *dcos) Schedule(instanceID string, options scheduler.ScheduleOptions) ([]*scheduler.Context, error) {
 	var apps []*spec.AppSpec
 	if len(options.AppKeys) > 0 {
