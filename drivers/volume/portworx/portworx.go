@@ -1050,6 +1050,17 @@ func (d *portworx) UpgradeDriver(version string) error {
 	return nil
 }
 
+// GetStorGetClusterPairingInfo return underlying storage details
+func (d *portworx) GetClusterPairingInfo() (map[string]string, error) {
+	pairInfo, err := d.schedOps.GetStorageInfo("/opt/kubeconfig")
+	if err != nil {
+		logrus.Info("err getting remote cluster info", err)
+		return pairInfo, err
+	}
+
+	return pairInfo, nil
+}
+
 func (d *portworx) getVolDriver() volume.VolumeDriver {
 	if d.refreshEndpoint {
 		d.setDriver()
