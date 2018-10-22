@@ -44,6 +44,10 @@ const (
 	dcosNodeType           = "kubernetes.dcos.io/node-type"
 	talismanServiceAccount = "talisman-account"
 	talismanImage          = "portworx/talisman:latest"
+	tokenKey               = "token"
+	clusterIP              = "clusterip"
+	clusterPort            = "clusterport"
+	pxPort                 = "9001"
 )
 
 const (
@@ -510,6 +514,68 @@ func (k *k8sSchedOps) IsPXEnabled(n node.Node) (bool, error) {
 
 	logrus.Infof("PX is enabled on node %v.", n.Name)
 	return true, nil
+}
+
+// GetStorageInfo returns cluster pair info from destination cluster refereced by kubeconfig
+func (k *k8sSchedOps) GetStorageInfo(destKubeConfig string) (map[string]string, error) {
+	pairInfo := make(map[string]string)
+	// get schd-ops/k8s instance of destination cluster
+	destClient := k8s.NewInstance(destKubeConfig)
+	if destClient == nil {
+		return pairInfo, fmt.Errorf("Unable to get new instance")
+	}
+
+	nodes, err := destClient.GetNodes()
+	if err != nil {
+		return pairInfo, err
+	}
+	var workerNode corev1.Node
+	// TODO(ram-infrac) :find px node, right now it's assumed that px is installed
+	// on all worker node
+	for _, node := range nodes.Items {
+		if !destClient.IsNodeMaster(node) {
+			workerNode = node
+			break
+		}
+	}
+
+	logrus.Info("worker node on remote :", workerNode.Name)
+	pxPods, err := destClient.GetPodsByNode(workerNode.Name, PXNamespace)
+	if err != nil {
+		return pairInfo, err
+	}
+	var pxPod corev1.Pod
+	for _, pod := range pxPods.Items {
+		if pod.Labels["name"] == PXDaemonSet {
+			pxPod = pod
+			break
+		}
+	}
+	// using first pod to get px token
+	logrus.Info("PX Pod seletcted", pxPod.Name)
+
+	cmdSplit := []string{"/opt/pwx/bin/pxctl", " cluster token show"}
+	logrus.Info("Executing pxctl command:", cmdSplit)
+	// Didn't understand 3rd argument ContainerName
+	out, err := destClient.RunCommandInPod(cmdSplit, pxPod.Name, "", PXNamespace)
+	if err != nil {
+		logrus.Info("Failed ", err)
+		//      return pairInfo, err
+	}
+
+	for _, addr := range workerNode.Status.Addresses {
+		if addr.Type == corev1.NodeExternalIP {
+			logrus.Info("addrs selected", addr.Address)
+			pairInfo[clusterIP] = addr.Address
+			break
+		}
+	}
+
+	logrus.Info("pxctl token received: ", out)
+	pairInfo[tokenKey] = strings.Fields(out)[2]
+	pairInfo[clusterPort] = pxPort
+
+	return pairInfo, nil
 }
 
 // getContainerPVCMountMap is a helper routine to return map of containers in the pod that

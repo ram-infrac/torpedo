@@ -66,6 +66,11 @@ func (d *dcosSchedOps) IsPXEnabled(n node.Node) (bool, error) {
 	// TODO: Implement this method
 	return true, nil
 }
+func (d *dcosSchedOps) GetStorageInfo(destKubeConfig string) (map[string]string, error) {
+	// TODO: Implement this methid
+	return nil, nil
+}
+
 func init() {
 	d := &dcosSchedOps{}
 	Register("dcos", d)
