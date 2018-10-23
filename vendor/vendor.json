@@ -195,15 +195,13 @@
 			"revisionTime": "2018-09-28T19:57:16Z"
 		},
 		{
-			"checksumSHA1": "qZSmQqTpM7GF32orPe1KdI+d+rA=",
-			"origin": "github.com/portworx/torpedo/vendor/github.com/portworx/sched-ops/k8s",
+			"checksumSHA1": "1X+VEOcPaGnqEn3IkxCIhQkGbVE=",
 			"path": "github.com/portworx/sched-ops/k8s",
-			"revision": "f56504b2d8c6cc9680234650f6ad52f9f0f70f1d",
-			"revisionTime": "2018-10-04T10:58:25Z"
+			"revision": "3497461783cd315f1dadbf710e0c4f4ba2e81dc7",
+			"revisionTime": "2018-10-23T05:54:32Z"
 		},
 		{
 			"checksumSHA1": "5Nh7ppJlsyP/6c2zK5joEHz3I30=",
-			"origin": "github.com/portworx/torpedo/vendor/github.com/portworx/sched-ops/task",
 			"path": "github.com/portworx/sched-ops/task",
 			"revision": "f56504b2d8c6cc9680234650f6ad52f9f0f70f1d",
 			"revisionTime": "2018-10-04T10:58:25Z"
