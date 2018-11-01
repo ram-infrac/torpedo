@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
-	"strconv"
 
 	snap_v1 "github.com/kubernetes-incubator/external-storage/snapshot/pkg/apis/crd/v1"
 	stork_api "github.com/libopenstorage/stork/pkg/apis/stork/v1alpha1"
@@ -26,12 +26,12 @@ import (
 	"k8s.io/api/core/v1"
 	storage_api "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
@@ -636,7 +636,12 @@ func (k *k8s) substituteNamespaceInVolumes(volumes []v1.Volume, ns string) []v1.
 }
 
 func (k *k8s) WaitForRunning(ctx *scheduler.Context, timeout, retryInterval time.Duration) error {
-	k8sOps := k8s_ops.Instance()
+	k8sOps, err := GetInstance(ctx)
+	if err != nil {
+		logrus.Errorf("Unable to get sched-op instance: %v", err)
+		return err
+	}
+
 	for _, spec := range ctx.App.SpecList {
 		if obj, ok := spec.(*apps_api.Deployment); ok {
 			if err := k8sOps.ValidateDeployment(obj, timeout, retryInterval); err != nil {
@@ -1157,7 +1162,7 @@ func (k *k8s) ResizeVolume(ctx *scheduler.Context) ([]*volume.Volume, error) {
 			}
 
 			for _, pvc := range pvcList.Items {
-				vol, err := k.resizePVCBy1GB(ctx, &pvc);
+				vol, err := k.resizePVCBy1GB(ctx, &pvc)
 				if err != nil {
 					return nil, err
 				}
@@ -1169,7 +1174,7 @@ func (k *k8s) ResizeVolume(ctx *scheduler.Context) ([]*volume.Volume, error) {
 	return vols, nil
 }
 
-func (k* k8s) resizePVCBy1GB(ctx *scheduler.Context , pvc *v1.PersistentVolumeClaim) (*volume.Volume, error) {
+func (k *k8s) resizePVCBy1GB(ctx *scheduler.Context, pvc *v1.PersistentVolumeClaim) (*volume.Volume, error) {
 	k8sOps := k8s_ops.Instance()
 	storageSize := pvc.Spec.Resources.Requests[v1.ResourceStorage]
 
@@ -1432,7 +1437,7 @@ func (k *k8s) StopSchedOnNode(n node.Node) error {
 	}
 	err := driver.Systemctl(n, SystemdSchedServiceName, systemOpts)
 	if err != nil {
-		return &scheduler.ErrFailedToStopSchedOnNode {
+		return &scheduler.ErrFailedToStopSchedOnNode{
 			Node:          n,
 			SystemService: SystemdSchedServiceName,
 			Cause:         err.Error(),
@@ -1452,13 +1457,26 @@ func (k *k8s) StartSchedOnNode(n node.Node) error {
 	}
 	err := driver.Systemctl(n, SystemdSchedServiceName, systemOpts)
 	if err != nil {
-		return &scheduler.ErrFailedToStartSchedOnNode {
+		return &scheduler.ErrFailedToStartSchedOnNode{
 			Node:          n,
 			SystemService: SystemdSchedServiceName,
 			Cause:         err.Error(),
 		}
 	}
 	return nil
+}
+
+// GetInstance return k8s Ops instance based on KubeConfig file specifed in
+// Scheduler context
+func GetInstance(ctx *scheduler.Context) (k8s_ops.Ops, error) {
+	if ctx.KubeConfig == "" {
+		k8sInstance := k8s_ops.Instance()
+		if k8sInstance == nil {
+			return nil, fmt.Errorf("Found empty k8s Ops")
+		}
+		return k8sInstance, nil
+	}
+	return k8s_ops.NewInstance(ctx.KubeConfig)
 }
 
 func insertLineBreak(note string) string {
